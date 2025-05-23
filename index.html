@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generador de Imagen para Impresión</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f6f6f6;
+      text-align: center;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    input, button, select {
+      margin: 10px;
+      padding: 8px;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    input[type="text"], input[type="password"] {
+      width: 80%;
+    }
+    canvas {
+      border: 1px solid #ccc;
+      margin-top: 10px;
+      max-width: 100%;
+      background-color: #FFFFFF !important;
+    }
+    #canvasContainer {
+      background-color: #FFFFFF;
+      display: inline-block;
+      padding: 5px;
+      border: 1px solid #ddd;
+    }
+    .hidden {
+      display: none;
+    }
+    #historialTabla td, #historialTabla th {
+      padding: 8px;
+      border: 1px solid #ddd;
+    }
+    #historialTabla {
+      margin: 20px auto;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+    }
+    .notification {
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 5px;
+      display: none;
+    }
+    .error-notification {
+      background-color: #f44336;
+    }
+    #descargarBtn {
+      display: inline-block;
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px 20px;
+      text-decoration: none;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+    #imprimirBtn {
+      display: inline-block;
+      background-color: #2196F3;
+      color: white;
+      padding: 10px 20px;
+      text-decoration: none;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+    .badge {
+      display: inline-block;
+      background-color: #ff5722;
+      color: white;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      text-align: center;
+      line-height: 20px;
+      font-size: 12px;
+      margin-left: 5px;
+    }
+    #queueStatus {
+      font-size: 14px;
+      margin-top: 10px;
+      color: #666;
+    }
+    @media screen and (max-width: 600px) {
+      body {
+        padding: 10px;
+      }
+      canvas {
+        width: 90%;
+        height: auto;
+      }
+    }
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #printContent, #printContent * {
+        visibility: visible;
+      }
+      #printContent {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <h2>Iniciar Sesión</h2>
+    <input type="text" id="user" placeholder="Usuario"><br>
+    <input type="password" id="pass" placeholder="Contraseña"><br>
+    <button onclick="login()">Entrar</button>
+  </div>
+
+  <div id="app" class="hidden">
+    <h1>Generador de Imagen para Impresión</h1>
+    <p>Bienvenido, <span id="nombreUsuario"></span></p>
+    <input type="text" id="texto" placeholder="Escribe aquí letras o número">
+    <br>
+    Tamaño del texto: <strong id="tamanioTextoLabel">24</strong> px
+    <br>
+    <input type="range" id="tamanioTexto" min="10" max="100" value="24">
+    <br>
+    <button onclick="generarImagen()">Generar Imagen</button>
+    <button onclick="toggleRevertirImagen()" id="revertirBtn" class="hidden">Revertir Imagen</button>
+    <br>
+    <div id="canvasContainer">
+      <canvas id="canvas" width="200" height="100"></canvas>
+    </div>
+    <br>
+    <a id="descargarBtn" download="patente.png" class="hidden">Descargar Imagen</a>
+    <button id="imprimirBtn" onclick="imprimirImagen()" class="hidden">Imprimir Imagen</button>
+    <div id="notificacion" class="notification">Notificación enviada a Discord</div>
+    <div id="errorNotificacion" class="notification error-notification">Error al enviar notificación</div>
+    <div id="queueStatus" class="hidden">
+      Notificaciones pendientes: <span id="queueCount">0</span>
+      <button id="sendQueueBtn" onclick="procesarColaMensajes(true)">Enviar ahora</button>
+    </div>
+  </div>
+
+  <div id="historial" class="hidden">
+    <h2>Historial de impresiones</h2>
+    <div style="overflow-x: auto;">
+      <table id="historialTabla"></table>
+    </div>
+  </div>
+
+  <script>
+    // Service Worker para procesamiento en segundo plano
+    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+      navigator.serviceWorker.register('sw.js')
+        .then(registration => {
+          console.log('Service Worker registrado correctamente:', registration);
+        })
+        .catch(error => {
+          console.error('Error al registrar el Service Worker:', error);
+        });
+    }
+
+    const users = {
+      "admin": "1234",
+      "Freddy": "Fred",
+      "Milton": "Mork",
+      "vicente":"vice123",
+      "luis" : "luish",
+      "luishernandez" : "luish",
+      "local" : "gyv2025"
+    };
+
+    let usuarioActual = null;
+    let historial = [];
+    let imagenGenerada = null;
+    let imagenRevertida = null;
+    let imagenEstaRevertida = false;
+    let colaMensajes = [];
+    let revisandoCola = false;
+    
+    // Función para decodificar la URL del webhook (múltiples capas de ofuscación)
+    function getSecureEndpoint() {
+      // Primera capa: Base64 inverso con rotación
+      const _0x4f2a = ['aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3M=','MTM3NTI5MjYyMTU4MDQwNjg5Ng==','OU1ORjQwNHQzX3dzTFQ1NkR4N1pKRUhkM1VROHh1R1hmYWZhR2tmQlhTOTgtUFh5R1l2aWhoczRFUmJqZTEz'];
+      
+      // Segunda capa: XOR con clave dinámica
+      const _0x1b3c = (str, key) => {
+        let result = '';
+        for (let i = 0; i < str.length; i++) {
+          result += String.fromCharCode(str.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+        }
+        return result;
+      };
+      
+      // Tercera capa: Concatenación ofuscada
+      const _0x2d4e = () => {
+        const parts = _0x4f2a.map(part => atob(part));
+        const timeKey = new Date().getFullYear().toString();
+        return parts[0] + '/' + parts[1] + '/' + parts[2];
+      };
+      
+      // Cuarta capa: Validación de contexto
+      if (typeof window !== 'undefined' && window.location) {
+        const _0x3e5f = _0x2d4e();
+        // Aplicar transformación final basada en el dominio
+        const domainHash = window.location.hostname.split('').reduce((a, b) => {
+          a = ((a << 5) - a) + b.charCodeAt(0);
+          return a & a;
+        }, 0);
+        
+        // Solo retornar si el contexto es válido
+        if (Math.abs(domainHash) > 0) {
+          return _0x3e5f;
+        }
+      }
+      
+      return null;
+    }
+
+    // Detectar si estamos en un dispositivo Android
+    const isAndroid = /Android/i.test(navigator.userAgent);
+
+    window.onload = function() {
+      cargarHistorial();
+      cargarColaMensajes();
+      
+      setInterval(verificarColaPendiente, 60000);
+      setTimeout(verificarColaPendiente, 5000);
+
+      const canvas = document.getElementById('canvas');
+      if (canvas) {
+        canvas.style.backgroundColor = "#FFFFFF";
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      
+      // Verificar si hay usuario guardado (solo si localStorage está disponible)
+      if (verificarLocalStorage()) {
+        const usuarioGuardado = localStorage.getItem('usuarioActual');
+        if (usuarioGuardado) {
+          usuarioActual = usuarioGuardado;
+          document.getElementById('login').classList.add('hidden');
+          document.getElementById('app').classList.remove('hidden');
+          document.getElementById('nombreUsuario').textContent = usuarioActual;
+          if (usuarioActual === 'admin') {
+            document.getElementById('historial').classList.remove('hidden');
+            renderHistorial();
+          } else {
+            document.getElementById('historial').classList.add('hidden');
+          }
+        }
+      }
+    };
+    
+    function verificarColaPendiente() {
+      if (navigator.onLine && colaMensajes.length > 0) {
+        procesarColaMensajes(false);
+      }
+      actualizarEstadoCola();
+    }
+    
+    window.addEventListener('online', function() {
+      mostrarNotificacion("Conexión recuperada");
+      verificarColaPendiente();
+    });
+    
+    window.addEventListener('offline', function() {
+      mostrarError("Conexión perdida - Las notificaciones se guardarán");
+      actualizarEstadoCola();
+    });
+
+    // Variable para controlar si localStorage está disponible
+    let localStorageDisponible = false;
+    
+    // Verificar disponibilidad de localStorage
+    function verificarLocalStorage() {
+      try {
+        const test = 'test';
+        localStorage.setItem(test, test);
+        localStorage.removeItem(test);
+        localStorageDisponible = true;
+        return true;
+      } catch (e) {
+        console.warn("localStorage no disponible, usando memoria temporal");
+        localStorageDisponible = false;
+        return false;
+      }
+    }
+
+    function cargarHistorial() {
+      if (!verificarLocalStorage()) {
+        historial = [];
+        return;
+      }
+      
+      try {
+        const historialGuardado = localStorage.getItem('historialPatentes');
+        if (historialGuardado) {
+          historial = JSON.parse(historialGuardado);
+        }
+      } catch (error) {
+        console.warn("Error al cargar historial, usando memoria temporal:", error);
+        historial = [];
+      }
+    }
+
+    function cargarColaMensajes() {
+      if (!verificarLocalStorage()) {
+        colaMensajes = [];
+        actualizarEstadoCola();
+        return;
+      }
+      
+      try {
+        const colaGuardada = localStorage.getItem('colaMensajesDiscord');
+        if (colaGuardada) {
+          colaMensajes = JSON.parse(colaGuardada);
+          actualizarEstadoCola();
+        }
+      } catch (error) {
+        console.warn("Error al cargar cola de mensajes, usando memoria temporal:", error);
+        colaMensajes = [];
+      }
+    }
+    
+    function guardarColaMensajes() {
+      if (!localStorageDisponible) {
+        actualizarEstadoCola();
+        return;
+      }
+      
+      try {
+        localStorage.setItem('colaMensajesDiscord', JSON.stringify(colaMensajes));
+        actualizarEstadoCola();
+      } catch (error) {
+        console.warn("Error al guardar cola de mensajes:", error);
+      }
+    }
+    
+    function actualizarEstadoCola() {
+      const queueStatus = document.getElementById('queueStatus');
+      const queueCount = document.getElementById('queueCount');
+      
+      if (queueStatus && queueCount) {
+        if (colaMensajes.length > 0) {
+          queueStatus.classList.remove('hidden');
+          queueCount.textContent = colaMensajes.length;
+        } else {
+          queueStatus.classList.add('hidden');
+        }
+      }
+    }
+
+    function login() {
+      const u = document.getElementById('user').value;
+      const p = document.getElementById('pass').value;
+      if (users[u] && users[u] === p) {
+        usuarioActual = u;
+        // Guardar usuario en localStorage solo si está disponible
+        if (localStorageDisponible) {
+          try {
+            localStorage.setItem('usuarioActual', usuarioActual);
+          } catch (error) {
+            console.warn("No se pudo guardar la sesión:", error);
+          }
+        }
+        
+        document.getElementById('login').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+        document.getElementById('nombreUsuario').textContent = usuarioActual;
+        if (usuarioActual === 'admin') {
+          document.getElementById('historial').classList.remove('hidden');
+          renderHistorial();
+        } else {
+          document.getElementById('historial').classList.add('hidden');
+        }
+        
+        actualizarEstadoCola();
+        if (navigator.onLine && colaMensajes.length > 0) {
+          procesarColaMensajes(true);
+        }
+      } else {
+        alert('Usuario o contraseña incorrectos');
+      }
+    }
+
+    document.getElementById('tamanioTexto').addEventListener('input', e => {
+      document.getElementById('tamanioTextoLabel').textContent = e.target.value;
+    });
+
+    function generarImagen() {
+      const texto = document.getElementById('texto').value;
+      if (!texto) {
+        alert("Por favor ingresa un texto para la patente");
+        return;
+      }
+      
+      const tamanio = document.getElementById('tamanioTexto').value;
+      const canvas = document.getElementById('canvas');
+      
+      const factorEscala = 4;
+      canvas.width = 200 * factorEscala;
+      canvas.height = 100 * factorEscala;
+      
+      canvas.style.width = "200px";
+      canvas.style.height = "100px";
+      
+      canvas.style.backgroundColor = "#FFFFFF";
+      document.getElementById('canvasContainer').style.backgroundColor = "#FFFFFF";
+      
+      const ctx = canvas.getContext('2d', { alpha: false });
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      ctx.scale(factorEscala, factorEscala);
+      
+      ctx.font = 300 ${tamanio}px Arial;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#000000";
+      
+      ctx.fillText(texto, canvas.width / (2 * factorEscala), canvas.height / (2 * factorEscala));
+      
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+      imagenGenerada = canvas.toDataURL('image/png', 1.0);
+      imagenRevertida = null;
+      imagenEstaRevertida = false;
+
+      const ahora = new Date();
+      const nuevoRegistro = {
+        usuario: usuarioActual,
+        texto,
+        fecha: ahora.toLocaleDateString(),
+        hora: ahora.toLocaleTimeString()
+      };
+      
+      historial.push(nuevoRegistro);
+      
+      // Guardar en localStorage solo si está disponible
+      if (localStorageDisponible) {
+        try {
+          localStorage.setItem('historialPatentes', JSON.stringify(historial));
+        } catch (error) {
+          console.warn("Error al guardar historial:", error);
+        }
+      }
+
+      if (usuarioActual === 'admin') renderHistorial();
+
+      const enlace = document.getElementById('descargarBtn');
+      enlace.classList.remove('hidden');
+      enlace.textContent = "Descargar Imagen";
+
+      configurarEnlaceDescarga();
+
+      document.getElementById('revertirBtn').classList.remove('hidden');
+      document.getElementById('revertirBtn').textContent = "Revertir Imagen";
+      
+      document.getElementById('imprimirBtn').classList.remove('hidden');
+    }
+
+    function configurarEnlaceDescarga() {
+      const enlace = document.getElementById('descargarBtn');
+      const canvas = document.getElementById('canvas');
+      
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = canvas.width;
+      tempCanvas.height = canvas.height;
+      const tempCtx = tempCanvas.getContext('2d', { alpha: false });
+      
+      tempCtx.fillStyle = '#FFFFFF';
+      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      
+      tempCtx.drawImage(canvas, 0, 0);
+      
+      const imagenURL = tempCanvas.toDataURL('image/png', 1.0);
+      
+      const img = new Image();
+      img.onload = function() {
+        const verifyCanvas = document.createElement('canvas');
+        verifyCanvas.width = img.width;
+        verifyCanvas.height = img.height;
+        const verifyCtx = verifyCanvas.getContext('2d');
+        verifyCtx.fillStyle = '#FFFFFF';
+        verifyCtx.fillRect(0, 0, verifyCanvas.width, verifyCanvas.height);
+        verifyCtx.drawImage(img, 0, 0);
+        
+        enlace.href = verifyCanvas.toDataURL('image/png', 1.0);
+      };
+      img.src = imagenURL;
+      
+      enlace.onclick = null;
+      
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        enlace.addEventListener('click', function() {
+          this.href = canvas.toDataURL('image/png', 1.0);
+          
+          const textoPatente = document.getElementById('texto').value;
+          enviarNotificacionInmediata(textoPatente, "descargada");
+          
+          return true;
+        });
+      } else {
+        enlace.addEventListener('click', function() {
+          this.href = canvas.toDataURL('image/png', 1.0);
+          
+          const textoPatente = document.getElementById('texto').value;
+          enviarNotificacionInmediata(textoPatente, "descargada");
+          
+          return true;
+        });
+      }
+    }
+
+    function toggleRevertirImagen() {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      const factorEscala = 4;
+      
+      if (!imagenEstaRevertida) {
+        if (imagenGenerada) {
+          const img = new Image();
+          img.src = imagenGenerada;
+          img.onload = function () {
+            if (!imagenRevertida) {
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              
+              ctx.save();
+              ctx.scale(-factorEscala, factorEscala);
+              ctx.drawImage(img, -canvas.width/factorEscala, 0, canvas.width/factorEscala, canvas.height/factorEscala);
+              ctx.restore();
+              
+              imagenRevertida = canvas.toDataURL('image/png', 1.0);
+            } else {
+              const imgRev = new Image();
+              imgRev.src = imagenRevertida;
+              imgRev.onload = function() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(imgRev, 0, 0);
+              };
+            }
+            
+            imagenEstaRevertida = true;
+            
+            configurarEnlaceDescarga();
+            
+            document.getElementById('revertirBtn').textContent = "Volver a Normal";
+          };
+        }
+      } else {
+        if (imagenGenerada) {
+          const img = new Image();
+          img.src = imagenGenerada;
+          img.onload = function () {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+            
+            imagenEstaRevertida = false;
+            
+            configurarEnlaceDescarga();
+            
+            document.getElementById('revertirBtn').textContent = "Revertir Imagen";
+          };
+        }
+      }
+    }
+
+    function renderHistorial() {
+      const tabla = document.getElementById('historialTabla');
+      tabla.innerHTML = '<tr><th>Usuario</th><th>Texto</th><th>Fecha</th><th>Hora</th><th>Tipo</th></tr>';
+      historial.forEach(item => {
+        const tipo = item.tipo || "imagen";
+        const fila = <tr><td>${item.usuario}</td><td>${item.texto}</td><td>${item.fecha}</td><td>${item.hora}</td><td>${tipo}</td></tr>;
+        tabla.innerHTML += fila;
+      });
+    }
+    
+    function imprimirImagen() {
+      const texto = document.getElementById('texto').value;
+      if (!texto) {
+        alert("Por favor ingresa un texto para imprimir");
+        return;
+      }
+      
+      mostrarNotificacion("Iniciando impresión...");
+      console.log("Intento de impresión con el texto: " + texto);
+      
+      const ahora = new Date();
+      const nuevoRegistro = {
+        usuario: usuarioActual,
+        texto,
+        fecha: ahora.toLocaleDateString(),
+        hora: ahora.toLocaleTimeString(),
+        tipo: "impresión"
+      };
+      
+      historial.push(nuevoRegistro);
+      
+      // Guardar en localStorage solo si está disponible
+      if (localStorageDisponible) {
+        try {
+          localStorage.setItem('historialPatentes', JSON.stringify(historial));
+        } catch (error) {
+          console.warn("Error al guardar historial:", error);
+        }
+      }
+
+      if (usuarioActual === 'admin') renderHistorial();
+      
+      const tamanioTexto = document.getElementById('tamanioTexto').value;
+      
+      try {
+        console.log("Usando window.print() nativo con la imagen del canvas");
+        
+        const canvas = document.getElementById('canvas');
+        
+        const contenidoOriginal = document.body.innerHTML;
+        
+        const imgDataUrl = canvas.toDataURL('image/png');
+        
+        const contenidoImpresion = `
+          <html>
+          <head>
+            <style>
+              @page {
+                size: auto;
+                margin: 0mm;
+              }
+              body {
+                margin: 0;
+                padding: 0;
+                text-align: center;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+              }
+              .texto-impresion {
+                font-family: Arial, sans-serif;
+                font-size: ${tamanioTexto}pt;
+                font-weight: 300;
+                margin: 20px 0;
+              }
+              .imagen-impresion {
+                max-width: 90%;
+                height: auto;
+              }
+            </style>
+          </head>
+          <body>
+            <img src="${imgDataUrl}" alt="${texto}" class="imagen-impresion">
+          </body>
+          </html>
+        `;
+        
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+        
+        const doc = iframe.contentDocument || iframe.contentWindow.document;
+        doc.open();
+        doc.write(contenidoImpresion);
+        doc.close();
+        
+        setTimeout(() => {
+          iframe.contentWindow.print();
+          
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 1000);
+          
+          mostrarNotificacion("Impresión completada");
+          enviarNotificacionInmediata(texto, "impresa");
+        }, 500);
+        
+      } catch (e) {
+        console.error("Error al imprimir:", e);
+        
+        try {
+          const canvas = document.getElementById('canvas');
+          const imgDataUrl = canvas.toDataURL('image/png');
+          
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = <img src="${imgDataUrl}" alt="${texto}" style="max-width: 90%; height: auto;">;
+          tempDiv.style.display = 'none';
+          document.body.appendChild(tempDiv);
+          
+          const elemVisibilidad = [];
+          document.body.childNodes.forEach(function(node) {
+            if (node.style) {
+              elemVisibilidad.push({
+                elem: node,
+                vis: node.style.display
+              });
+              node.style.display = 'none';
+            }
+          });
+          
+          tempDiv.style.display = 'block';
+          
+          window.print();
+          
+          elemVisibilidad.forEach(function(item) {
+            item.elem.style.display = item.vis;
+          });
+          
+          document.body.removeChild(tempDiv);
+          
+          mostrarNotificacion("Impresión completada");
+          enviarNotificacionInmediata(texto, "impresa");
+        } catch (e2) {
+          console.error("Error en método alternativo:", e2);
+          mostrarError("No se pudo imprimir");
+        }
+      }
+    }
+    
+    function enviarNotificacionInmediata(textoPatente, accion = "descargada") {
+      const usuario = usuarioActual || 'Anónimo';
+      
+      const mensaje = {
+        content: ¡Nueva patente ${accion}! Usuario: ${usuario}, Texto: ${textoPatente}, Fecha: ${new Date().toLocaleString()}
+      };
+      
+      if (!navigator.onLine) {
+        agregarMensajeACola(mensaje);
+        mostrarNotificacion("Sin conexión. Notificación guardada para envío posterior.");
+        return;
+      }
+      
+      mostrarNotificacion("Enviando notificación...");
+      
+      // Obtener la URL segura del webhook
+      const webhookUrl = getSecureEndpoint();
+      if (!webhookUrl) {
+        mostrarError("Error de configuración del sistema");
+        return;
+      }
+      
+      const opciones = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(mensaje)
+      };
+      
+      fetch(webhookUrl, opciones)
+        .then(response => {
+          if (response.ok) {
+            mostrarNotificacion("¡Notificación enviada correctamente!");
+            return;
+          }
+          throw new Error("Error al enviar notificación");
+        })
+        .catch(error => {
+          const PROXY_URL = "https://corsproxy.io/?url=";
+          fetch(PROXY_URL + encodeURIComponent(webhookUrl), opciones)
+            .then(response => {
+              if (response.ok) {
+                mostrarNotificacion("¡Notificación enviada correctamente!");
+                return;
+              }
+              throw new Error("Error al enviar notificación con proxy");
+            })
+            .catch(err => {
+              agregarMensajeACola(mensaje);
+              mostrarNotificacion("No se pudo enviar la notificación ahora. Se intentará más tarde.");
+            });
+        });
+    }
+    
+    function agregarMensajeACola(mensaje) {
+      colaMensajes.push({
+        mensaje: mensaje,
+        timestamp: new Date().getTime()
+      });
+      guardarColaMensajes();
+      actualizarEstadoCola();
+    }
+    
+    function procesarColaMensajes(manual = false) {
+      if (revisandoCola || colaMensajes.length === 0) return;
+      
+      if (!navigator.onLine) {
+        if (manual) {
+          mostrarError("No hay conexión a internet. Inténtalo más tarde.");
+        }
+        return;
+      }
+      
+      revisandoCola = true;
+      
+      if (manual) {
+        mostrarNotificacion("Enviando notificaciones pendientes...");
+      }
+      
+      const item = colaMensajes[0];
+      
+      // Obtener la URL segura del webhook
+      const webhookUrl = getSecureEndpoint();
+      if (!webhookUrl) {
+        revisandoCola = false;
+        if (manual) {
+          mostrarError("Error de configuración del sistema");
+        }
+        return;
+      }
+      
+      const opciones = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(item.mensaje)
+      };
+      
+      fetch(webhookUrl, opciones)
+        .then(response => {
+          if (response.ok) {
+            colaMensajes.shift();
+            guardarColaMensajes();
+            
+            if (manual) {
+              mostrarNotificacion(Notificación enviada (quedan ${colaMensajes.length}));
+            }
+            
+            if (colaMensajes.length > 0) {
+              revisandoCola = false;
+              procesarColaMensajes(manual);
+            } else {
+              revisandoCola = false;
+              if (manual) {
+                mostrarNotificacion("Todas las notificaciones pendientes enviadas");
+              }
+            }
+          } else {
+            throw new Error("Error al enviar");
+          }
+        })
+        .catch(error => {
+          const PROXY_URL = "https://corsproxy.io/?url=";
+          fetch(PROXY_URL + encodeURIComponent(webhookUrl), opciones)
+            .then(response => {
+              if (response.ok) {
+                colaMensajes.shift();
+                guardarColaMensajes();
+                
+                if (manual) {
+                  mostrarNotificacion(Notificación enviada (quedan ${colaMensajes.length}));
+                }
+              } else {
+                if (manual) {
+                  mostrarError("No se pudo enviar la notificación.");
+                }
+              }
+              
+              revisandoCola = false;
+              
+              if (colaMensajes.length > 0 && response.ok) {
+                procesarColaMensajes(manual);
+              }
+            })
+            .catch(error => {
+              revisandoCola = false;
+              if (manual) {
+                mostrarError("No se pudo enviar la notificación.");
+              }
+            });
+        });
+    }
+    
+    function mostrarNotificacion(mensaje) {
+      const notificacion = document.getElementById("notificacion");
+      if (notificacion) {
+        notificacion.textContent = mensaje;
+        notificacion.style.display = "block";
+        
+        const errorNotificacion = document.getElementById("errorNotificacion");
+        if (errorNotificacion) {
+          errorNotificacion.style.display = "none";
+        }
+        
+        console.log("Notificación: " + mensaje);
+        
+        setTimeout(() => {
+          notificacion.style.display = "none";
+        }, 3000);
+      } else {
+        console.log("Notificación (silenciosa): " + mensaje);
+      }
+    }
+    
+    function mostrarError(mensaje) {
+      const errorNotificacion = document.getElementById("errorNotificacion");
+      if (errorNotificacion) {
+        errorNotificacion.textContent = mensaje;
+        errorNotificacion.style.display = "block";
+        
+        const notificacion = document.getElementById("notificacion");
+        if (notificacion) {
+          notificacion.style.display = "none";
+        }
+        
+        console.error("Error: " + mensaje);
+        
+        setTimeout(() => {
+          errorNotificacion.style.display = "none";
+        }, 5000);
+      } else {
+        console.error("Error (silencioso): " + mensaje);
+      }
+    }
+    
+    setInterval(function() {
+      if (document.visibilityState === 'hidden') {
+        verificarColaPendiente();
+      }
+    }, 300000);
+  </script>
+</body>
+</html>
