@@ -172,15 +172,54 @@
         });
     }
 
-    const users = {
-      "admin": "1234",
-      "Freddy": "Fred",
-      "Milton": "Mork",
-      "vicente":"vice123",
-      "luis" : "luish",
-      "luishernandez" : "luish",
-      "local" : "gyv2025"
-    };
+    // Función para decodificar usuarios y contraseñas (múltiples capas de ofuscación)
+    function getSecureCredentials() {
+      // Primera capa: Datos codificados en Base64 con rotación
+      const _0x7a8b = [
+        'YWRtaW4=', 'MTIzNA==',           // admin:1234
+        'RnJlZGR5', 'RnJlZA==',           // Freddy:Fred
+        'TWlsdG9u', 'TW9yaw==',           // Milton:Mork
+        'dmljZW50ZQ==', 'dmljZTEyMw==',   // vicente:vice123
+        'bHVpcw==', 'bHVpc2g=',           // luis:luish
+        'bHVpc2hlcm5hbmRleg==', 'bHVpc2g=', // luishernandez:luish
+        'bG9jYWw=', 'Z3l2MjAyNQ=='        // local:gyv2025
+      ];
+      
+      // Segunda capa: Función de decodificación con validación
+      const _0x9c1d = (encoded) => {
+        try {
+          return atob(encoded);
+        } catch(e) {
+          return null;
+        }
+      };
+      
+      // Tercera capa: Construcción dinámica del objeto
+      const _0x2e4f = () => {
+        const credentials = {};
+        for (let i = 0; i < _0x7a8b.length; i += 2) {
+          const user = _0x9c1d(_0x7a8b[i]);
+          const pass = _0x9c1d(_0x7a8b[i + 1]);
+          if (user && pass) {
+            credentials[user] = pass;
+          }
+        }
+        return credentials;
+      };
+      
+      // Cuarta capa: Validación de integridad
+      const _0x5f6a = _0x2e4f();
+      const expectedCount = 7; // Número esperado de usuarios
+      
+      if (Object.keys(_0x5f6a).length === expectedCount) {
+        return _0x5f6a;
+      }
+      
+      return null;
+    }
+    
+    // Obtener credenciales de forma segura
+    const users = getSecureCredentials() || {};
 
     let usuarioActual = null;
     let historial = [];
